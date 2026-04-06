@@ -70,7 +70,8 @@ public:
     QSGVideoMaterial_OES()
         : m_nextFrame(), m_currentFrame(), m_opacity(1.0)
     {
-        setFlag(Blending, true);
+        m_forceBlending = qgetenv("QTVIDEONODE_FORCE_BLENDING").toInt() > 0;
+        setFlag(Blending, m_forceBlending);
     }
     ~QSGVideoMaterial_OES()
     {
@@ -94,8 +95,7 @@ public:
 
     void updateBlending()
     {
-        // setFlag(Blending, qFuzzyCompare(m_opacity, qreal(1.0)) ? false : true);
-        setFlag(Blending, true);
+        setFlag(Blending, m_forceBlending || !qFuzzyCompare(m_opacity, qreal(1.0)));
     }
 
     void setVideoFrame(const QVideoFrame &frame)
@@ -133,6 +133,7 @@ private:
     QVideoFrame m_prevFrame;
     //QMutex m_frameMutex;
     qreal m_opacity;
+    bool m_forceBlending;
     
 };
 
