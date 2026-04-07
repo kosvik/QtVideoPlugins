@@ -1,0 +1,17 @@
+qt-video-oes-plugins (1.0.4) UNRELEASED; urgency=medium
+
+  * Fixed DRM header include
+  * Use eglCreateImageKHR for backward compatibility
+  * Added Qt5MultimediaGstTools as dependency
+  * Added Qt5MultimediaQuick library as a dependency
+  * Added EGLImageBuilder to cover both versions EGL 1.4 and EGL 1.5 in
+    runtime
+  * Added debian_build configruation options
+
+ -- Konstantin <konstantin@it-screen.net>  Tue, 07 Apr 2026 10:09:44 +0200
+
+qt-video-oes-plugins (1.0.0) bullseye; urgency=medium
+
+  * Initial release.
+
+ -- Konstantin <konstantin@it-screen.net>  Sat, 28 Mar 2026 12:00:00 +0000

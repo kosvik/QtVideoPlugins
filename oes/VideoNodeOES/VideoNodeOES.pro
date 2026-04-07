@@ -1,7 +1,11 @@
 TEMPLATE = lib
 TARGET = videonodeoes
 
-QT += multimedia-private qtmultimediaquicktools-private
+QT += core-private multimedia quick
+
+!debian_build {
+    QT += multimedia-private qtmultimediaquicktools-private
+}
 
 CONFIG += plugin egl console
 
@@ -20,4 +24,7 @@ unix {
     INSTALLS += target
 }
 
-# LIBS += -lEGL
+debian_build {
+    LIBS += -lQt5MultimediaQuick
+}
+

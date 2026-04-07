@@ -1,0 +1,23 @@
+Source: qt-video-oes-plugins
+Maintainer: Konstantin <konstantin@example.com>
+Section: misc
+Priority: optional
+Build-Depends: debhelper-compat (= 13),
+               qtbase5-private-dev,
+               qtdeclarative5-dev,
+               libgstreamer1.0-dev,
+               libgstreamer-plugins-base1.0-dev,
+               qtmultimedia5-dev,
+               libdrm-dev,
+               libasound2-dev,
+               libpulse-dev
+Standards-Version: 4.5.0
+
+Package: qt-video-oes-plugins
+Architecture: any
+Depends: ${shlibs:Depends},
+         ${misc:Depends}
+Description: Qt5 video plugins for OES textures.
+ This package provides two plugins:
+  - GstVideoOES: A GStreamer video renderer that uses OES textures.
+  - VideoNodeOES: A QML video node that uses OES textures.

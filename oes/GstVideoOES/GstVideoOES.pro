@@ -1,11 +1,18 @@
 TEMPLATE = lib
 TARGET = gstvideooes
 
-QT += core-private multimedia-private multimediagsttools-private 
+QT += gui-private multimedia
 
-CONFIG += plugin egl console
+!debian_build {
+    QT += multimedia-private multimediagsttools-private
+}
 
-QMAKE_USE += gstreamer
+CONFIG += plugin egl console link_pkgconfig c++17
+
+PKGCONFIG += gstreamer-1.0 \
+             gstreamer-video-1.0 \
+             gstreamer-allocators-1.0 \
+             libdrm
 
 HEADERS += \
     gstoesvideorenderer.h
@@ -22,3 +29,7 @@ unix {
 }
 
 # LIBS += -lgstallocators-1.0 -lEGL
+debian_build {
+    LIBS += -lQt5MultimediaGstTools
+}
+

@@ -1,0 +1,38 @@
+#!/usr/bin/make -f
+
+export DH_VERBOSE=1
+
+%:
+	dh $@ --with-qmake
+
+override_dh_auto_configure:
+	# 1. Create a directory for the headers
+	mkdir -p $(CURDIR)/qt-private-headers
+	
+	# 2. Download the qtmultimedia source code into that directory
+	# We use --only-source to just get the tarball/files
+	cd $(CURDIR)/qt-private-headers && apt-get source libqt5multimedia5
+	
+	# 3. Use a shell script block to extract variables and run configure
+	# Note the backslashes to keep this in ONE shell process
+	@export QT_SRC_PATH=$$(ls -d $(CURDIR)/qt-private-headers/qtmultimedia-opensource-src-*); \
+	export QT_SRC_NAME=$$(basename $$QT_SRC_PATH); \
+	export QT_VER=$${QT_SRC_NAME#qtmultimedia-opensource-src-}; \
+	echo "--- DEBUG INFO ---"; \
+	echo "PATH: $$QT_SRC_PATH"; \
+	echo "VER:  $$QT_VER"; \
+	echo "------------------"; \
+	dh_auto_configure -- \
+		INCLUDEPATH+=$$QT_SRC_PATH/include/QtMultimediaGstTools/$$QT_VER/QtMultimediaGstTools \
+		INCLUDEPATH+=$$QT_SRC_PATH/include/QtMultimediaQuick/$$QT_VER/QtMultimediaQuick \
+		PREFIX=/usr \
+		CONFIG+=debian_build
+
+override_dh_auto_build:
+	dh_auto_build
+
+override_dh_auto_install:
+	dh_auto_install
+
+override_dh_auto_clean:
+	dh_auto_clean

@@ -1,0 +1,7 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: qt-video-oes-plugins
+
+Files: *
+Copyright: 2026 Konstantin <konstantin@it-screen.net>
+License: LGPL-3.0
+ https://www.gnu.org/licenses/lgpl-3.0.html
