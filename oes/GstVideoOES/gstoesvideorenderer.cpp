@@ -1,7 +1,7 @@
 #include <QDebug>
 #include <gst/video/gstvideometa.h>
 #include <gst/allocators/gstdmabuf.h>
-#include <drm/drm_fourcc.h>
+#include <libdrm/drm_fourcc.h>
 #include <qabstractvideosurface.h>
 #include <private/qgstutils_p.h>
 #include <QGuiApplication>
@@ -11,6 +11,94 @@
 
 
 namespace {
+/**
+ * @struct EGLImageBuilder
+ * @brief An RAII wrapper and stack-allocated attribute builder for EGLImage.
+ *
+ * This class bridges the gap between EGL 1.4 (32-bit EGLint) and EGL 1.5 (64-bit EGLAttrib).
+ * It handles automatic function discovery for creation and destruction, and ensures
+ * the EGLImage is destroyed when this object goes out of scope.
+ */
+template<size_t MaxEntries = 20>
+struct EGLImageBuilder
+{
+    // --- Static Function Discovery ---
+
+    using CreateFunc = EGLImageKHR(EGLAPIENTRY*)(EGLDisplay, EGLContext, EGLenum, EGLClientBuffer, const void*);
+    using DestroyFunc = EGLBoolean(EGLAPIENTRY*)(EGLDisplay, EGLImageKHR);
+
+    static inline CreateFunc eglCreateImagePtr = []() {
+        auto ptr = reinterpret_cast<CreateFunc>(eglGetProcAddress("eglCreateImage"));
+        return ptr ? ptr : reinterpret_cast<CreateFunc>(eglGetProcAddress("eglCreateImageKHR"));
+    }();
+
+    static inline DestroyFunc eglDestroyImagePtr = []() {
+        auto ptr = reinterpret_cast<DestroyFunc>(eglGetProcAddress("eglDestroyImage"));
+        return ptr ? ptr : reinterpret_cast<DestroyFunc>(eglGetProcAddress("eglDestroyImageKHR"));
+    }();
+
+    static inline bool isKHR() {
+        static bool _isKHR = !eglGetProcAddress("eglCreateImage");
+        return _isKHR;
+    }
+
+    // --- RAII Data Members ---
+
+    EGLDisplay m_display = EGL_NO_DISPLAY;
+    EGLImageKHR m_image = EGL_NO_IMAGE_KHR;
+    
+    alignas(EGLAttrib) uint8_t m_buffer[(MaxEntries * 2 + 1) * sizeof(EGLAttrib)];
+    size_t m_count = 0;
+
+    // --- Implementation ---
+
+    EGLImageBuilder(EGLDisplay dpy = EGL_NO_DISPLAY) : m_display(dpy) {}
+
+    // Destructor performs the RAII cleanup
+    ~EGLImageBuilder() {
+        if (m_image != EGL_NO_IMAGE_KHR && m_display != EGL_NO_DISPLAY && eglDestroyImagePtr) {
+            eglDestroyImagePtr(m_display, m_image);
+        }
+    }
+
+    // Disable copying to prevent double-destruction of the EGLImage
+    EGLImageBuilder(const EGLImageBuilder&) = delete;
+    EGLImageBuilder& operator=(const EGLImageBuilder&) = delete;
+
+    bool append(EGLint key, EGLAttrib value) {
+        if (m_count >= MaxEntries) return false;
+
+        if (isKHR()) {
+            EGLint* p = reinterpret_cast<EGLint*>(m_buffer);
+            p[m_count * 2] = static_cast<EGLint>(key);
+            p[m_count * 2 + 1] = static_cast<EGLint>(value);
+        } else {
+            EGLAttrib* p = reinterpret_cast<EGLAttrib*>(m_buffer);
+            p[m_count * 2] = static_cast<EGLAttrib>(key);
+            p[m_count * 2 + 1] = value;
+        }
+        m_count++;
+        return true;
+    }
+
+    bool create() {
+        if (!eglCreateImagePtr || m_display == EGL_NO_DISPLAY) return false;
+        
+        // Terminate the list with EGL_NONE
+        if (isKHR()) reinterpret_cast<EGLint*>(m_buffer)[m_count * 2] = EGL_NONE;
+        else reinterpret_cast<EGLAttrib*>(m_buffer)[m_count * 2] = EGL_NONE;
+
+        m_image = eglCreateImagePtr(m_display, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, NULL, m_buffer);
+        return m_image != EGL_NO_IMAGE_KHR;
+    }
+
+    EGLImageKHR image() const { return m_image; }
+};
+
+bool has_egl_dmabuf_support(EGLDisplay dpy) {
+  const char* exts = eglQueryString(dpy, EGL_EXTENSIONS);
+  return exts && strstr(exts, "EGL_EXTENSIONS_LINUX_DMA_BUF_EXT");
+}
 
 int _drm_fourcc_from_info (const GstVideoInfo * info)
 {
@@ -111,6 +199,7 @@ int _drm_fourcc_from_info (const GstVideoInfo * info)
   }
 }
 
+#if 0
 gint
 get_egl_stride (const GstVideoInfo * info, gint plane)
 {
@@ -123,8 +212,9 @@ get_egl_stride (const GstVideoInfo * info, gint plane)
   return GST_VIDEO_TILE_X_TILES (stride) *
       GST_VIDEO_FORMAT_INFO_TILE_STRIDE (finfo, plane);
 }
+#endif
 
-qint64 setFrameTimeStamps(QVideoFrame *frame, GstBuffer *buffer)
+qint64 set_frame_timestamp(QVideoFrame *frame, GstBuffer *buffer)
 {
     // GStreamer uses nanoseconds, Qt uses microseconds
     qint64 startTime = GST_BUFFER_TIMESTAMP(buffer);
@@ -138,7 +228,7 @@ qint64 setFrameTimeStamps(QVideoFrame *frame, GstBuffer *buffer)
     return startTime;
 }
 
-bool check_dmabuf_support(GstBuffer *buffer)
+bool is_dmabuf_memory(GstBuffer *buffer)
 {
     GstVideoMeta* vm = gst_buffer_get_video_meta(buffer);
     if (!vm)
@@ -154,9 +244,6 @@ bool check_dmabuf_support(GstBuffer *buffer)
 OESTexture createTextureFromDmaBuf(GstBuffer *buffer, const GstVideoInfo &info,  EGLDisplay dpy, bool verbose)
 {
     static const PFNGLEGLIMAGETARGETTEXTURE2DOESPROC glEGLImageTargetTexture2DOES = reinterpret_cast<PFNGLEGLIMAGETARGETTEXTURE2DOESPROC>(eglGetProcAddress("glEGLImageTargetTexture2DOES"));
-
-    //if (!glEGLImageTargetTexture2DOES)
-    //    return 0;
     
     GstVideoMeta* vm = gst_buffer_get_video_meta(buffer);
     if (!vm)
@@ -208,62 +295,44 @@ OESTexture createTextureFromDmaBuf(GstBuffer *buffer, const GstVideoInfo &info, 
         }
     }
 
-    EGLAttrib attribs[41];         /* 6 + 10 * 3 + 4 + 1 */
-    gint atti = 0;
-    guint64 modifier = DRM_FORMAT_MOD_BROADCOM_VC4_T_TILED;
+    EGLImageBuilder<> eglImage(dpy);
+    
+    guint64 modifier = 0; // DRM_FORMAT_MOD_BROADCOM_VC4_T_TILED;
 
-    attribs[atti++] = EGL_WIDTH;
-    attribs[atti++] = GST_VIDEO_INFO_WIDTH (&info);
-    attribs[atti++] = EGL_HEIGHT;
-    attribs[atti++] = GST_VIDEO_INFO_HEIGHT (&info);
-    attribs[atti++] = EGL_LINUX_DRM_FOURCC_EXT;
-    attribs[atti++] = fourcc;
+    eglImage.append(EGL_WIDTH, GST_VIDEO_INFO_WIDTH (&info));
+    eglImage.append(EGL_HEIGHT, GST_VIDEO_INFO_HEIGHT (&info));
+    eglImage.append(EGL_LINUX_DRM_FOURCC_EXT, fourcc);
 
     /* first plane */
     {
-      attribs[atti++] = EGL_DMA_BUF_PLANE0_FD_EXT;
-      attribs[atti++] = fd[0];
-      attribs[atti++] = EGL_DMA_BUF_PLANE0_OFFSET_EXT;
-      attribs[atti++] = offset[0];
-      attribs[atti++] = EGL_DMA_BUF_PLANE0_PITCH_EXT;
-      attribs[atti++] = vm->stride[0]; //get_egl_stride (&info, 0) * stride_scale;
+      eglImage.append(EGL_DMA_BUF_PLANE0_FD_EXT, fd[0]);
+      eglImage.append(EGL_DMA_BUF_PLANE0_OFFSET_EXT, offset[0]);
+      eglImage.append(EGL_DMA_BUF_PLANE0_PITCH_EXT, vm->stride[0]); //get_egl_stride (&info, 0) * stride_scale);
       if (with_modifiers) {
-        attribs[atti++] = EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT;
-        attribs[atti++] = modifier & 0xffffffff;
-        attribs[atti++] = EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT;
-        attribs[atti++] = (modifier >> 32) & 0xffffffff;
+        eglImage.append(EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT, modifier & 0xffffffff);
+        eglImage.append(EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT, (modifier >> 32) & 0xffffffff);
       }
     }
     /* second plane */
     if (vm->n_planes >= 2) {
-      attribs[atti++] = EGL_DMA_BUF_PLANE1_FD_EXT;
-      attribs[atti++] = fd[1];
-      attribs[atti++] = EGL_DMA_BUF_PLANE1_OFFSET_EXT;
-      attribs[atti++] = offset[1];
-      attribs[atti++] = EGL_DMA_BUF_PLANE1_PITCH_EXT;
-      attribs[atti++] = vm->stride[1];
+      eglImage.append(EGL_DMA_BUF_PLANE1_FD_EXT, fd[1]);
+      eglImage.append(EGL_DMA_BUF_PLANE1_OFFSET_EXT, offset[1]);
+      eglImage.append(EGL_DMA_BUF_PLANE1_PITCH_EXT, vm->stride[1]);
       if (with_modifiers) {
-        attribs[atti++] = EGL_DMA_BUF_PLANE1_MODIFIER_LO_EXT;
-        attribs[atti++] = modifier & 0xffffffff;
-        attribs[atti++] = EGL_DMA_BUF_PLANE1_MODIFIER_HI_EXT;
-        attribs[atti++] = (modifier >> 32) & 0xffffffff;
+        eglImage.append(EGL_DMA_BUF_PLANE1_MODIFIER_LO_EXT, modifier & 0xffffffff);
+        eglImage.append(EGL_DMA_BUF_PLANE1_MODIFIER_HI_EXT, (modifier >> 32) & 0xffffffff);
       }
     }
 
     /* third plane */
     if (vm->n_planes == 3) {
-      attribs[atti++] = EGL_DMA_BUF_PLANE2_FD_EXT;
-      attribs[atti++] = fd[2];
-      attribs[atti++] = EGL_DMA_BUF_PLANE2_OFFSET_EXT;
-      attribs[atti++] = offset[2];
-      attribs[atti++] = EGL_DMA_BUF_PLANE2_PITCH_EXT;
-      attribs[atti++] = vm->stride[2];
-      if (with_modifiers) {
-        attribs[atti++] = EGL_DMA_BUF_PLANE2_MODIFIER_LO_EXT;
-        attribs[atti++] = modifier & 0xffffffff;
-        attribs[atti++] = EGL_DMA_BUF_PLANE2_MODIFIER_HI_EXT;
-        attribs[atti++] = (modifier >> 32) & 0xffffffff;
-      }
+        eglImage.append(EGL_DMA_BUF_PLANE2_FD_EXT, fd[2]);
+        eglImage.append(EGL_DMA_BUF_PLANE2_OFFSET_EXT, offset[2]);
+        eglImage.append(EGL_DMA_BUF_PLANE2_PITCH_EXT, vm->stride[2]);
+        if (with_modifiers) {
+          eglImage.append(EGL_DMA_BUF_PLANE2_MODIFIER_LO_EXT, modifier & 0xffffffff);
+          eglImage.append(EGL_DMA_BUF_PLANE2_MODIFIER_HI_EXT, (modifier >> 32) & 0xffffffff);
+        }
     }
 #if 1
     {
@@ -283,8 +352,7 @@ OESTexture createTextureFromDmaBuf(GstBuffer *buffer, const GstVideoInfo &info, 
           break;
     }
     if (color_space != 0) {
-      attribs[atti++] = EGL_YUV_COLOR_SPACE_HINT_EXT;
-      attribs[atti++] = color_space;
+      eglImage.append(EGL_YUV_COLOR_SPACE_HINT_EXT, color_space);
     }
   }
 
@@ -302,19 +370,17 @@ OESTexture createTextureFromDmaBuf(GstBuffer *buffer, const GstVideoInfo &info, 
         break;
     }
     if (range != 0) {
-      attribs[atti++] = EGL_SAMPLE_RANGE_HINT_EXT;
-      attribs[atti++] = range;
+      eglImage.append(EGL_SAMPLE_RANGE_HINT_EXT, range);
     }
   }
 #endif
-  /* Add the EGL_NONE sentinel */
-    attribs[atti] = EGL_NONE;
 
-    EGLImageKHR eglimage = eglCreateImage(dpy,EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, NULL, attribs);
 
-    if (eglimage == EGL_NO_IMAGE_KHR)
+//    EGLImageKHR eglimage = eglCreateImageKHR(dpy,EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, NULL, attribs);
+
+    if (!eglImage.create())
     {
-        qWarning("eglCreateImageKHR failed!");
+        qWarning("eglCreateImage failed!");
         return 0;
     }
 
@@ -324,14 +390,13 @@ OESTexture createTextureFromDmaBuf(GstBuffer *buffer, const GstVideoInfo &info, 
     glBindTexture(GL_TEXTURE_EXTERNAL_OES, tex);
 
     // Import the EGL Image into the texture
-    glEGLImageTargetTexture2DOES(GL_TEXTURE_EXTERNAL_OES, eglimage);
+    glEGLImageTargetTexture2DOES(GL_TEXTURE_EXTERNAL_OES, eglImage.image());
 
     glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
-    eglDestroyImage(dpy, eglimage);
     return tex;
 
 }
@@ -398,7 +463,7 @@ GstOESVideoRenderer::~GstOESVideoRenderer()
 
 GstCaps *GstOESVideoRenderer::getCaps(QAbstractVideoSurface *surface)
 {
-    qInfo()<<"GstOESVideoRenderer:getCaps";
+    qDebug()<<"GstOESVideoRenderer:getCaps";
 
     if (!eglGetProcAddress("glEGLImageTargetTexture2DOES"))
     {
@@ -440,12 +505,18 @@ bool GstOESVideoRenderer::start(QAbstractVideoSurface *surface, GstCaps *caps)
             qWarning("No EGL Display");
             return false;
         }
+        if (!has_egl_dmabuf_support(m_eglDisplay))
+        {
+            qWarning("EGL Display does not support EGL_EXTENSIONS_LINUX_DMA_BUF_EXT");
+            return false;
+        }
     }
 
     m_flushed = true;
     m_format = QGstUtils::formatForCaps(caps, &m_videoInfo, OESTextureHandle);
 
-    qInfo()<<"GstOESVideoRenderer:start "<<m_videoInfo.width<<"x"<<m_videoInfo.height;
+    if (m_verbose)
+      qInfo()<<"GstOESVideoRenderer:start "<<m_videoInfo.width<<"x"<<m_videoInfo.height;
 
     //m_format = QVideoSurfaceFormat(QSize(m_videoInfo.width,m_videoInfo.height),QVideoFrame::Format_NV21,QAbstractVideoBuffer::EGLImageHandle);
 
@@ -461,12 +532,11 @@ bool GstOESVideoRenderer::start(QAbstractVideoSurface *surface, GstCaps *caps)
 
 void GstOESVideoRenderer::stop(QAbstractVideoSurface *surface)
 {
-#ifndef QT_NO_DEBUG
-    qInfo()<<"GstOESVideoRenderer::stopped";
-#endif
+    if (m_verbose)
+      qInfo()<<"GstOESVideoRenderer::stopped";
     m_flushed = true;
     if (surface)
-        surface->stop();
+      surface->stop();
     // m_frame = QVideoFrame();
 }
 
@@ -507,19 +577,18 @@ bool GstOESVideoRenderer::present(QAbstractVideoSurface *surface, GstBuffer *buf
 
     bool verbose = m_frameCount>0 && m_frameCount<6 && m_verbose;
     
-    if (!check_dmabuf_support(buffer))
+    if (!is_dmabuf_memory(buffer))
     {
         if (verbose)
             qWarning()<<"GstBuffer memory is not DMABuf!";
         return false;
     }
-    //EGLImageKHR image = create_eglimage(buffer, m_videoInfo, m_eglDisplay, m_verbose);
 
     QVideoFrame frame(
                 new GstOESVideoBuffer(buffer, m_videoInfo, m_eglDisplay),
                 m_format.frameSize(),
                 m_format.pixelFormat());
-    qint64 st =setFrameTimeStamps(&frame, buffer);
+    qint64 st =set_frame_timestamp(&frame, buffer);
 
     bool res = surface->present(frame);
 
@@ -536,11 +605,10 @@ void GstOESVideoRenderer::flush(QAbstractVideoSurface *surface)
 {
     if (surface && !m_flushed)
     {
-#ifndef QT_NO_DEBUG
-        qWarning()<<"GstOESVideoRenderer::flush "<<m_timer.elapsed();
-#endif
-       // m_frame = QVideoFrame();
-        surface->present(QVideoFrame());
+      if (m_verbose)
+        qInfo()<<"GstOESVideoRenderer::flush "<<m_timer.elapsed();
+      // m_frame = QVideoFrame();
+      surface->present(QVideoFrame());
     }
     m_flushed = true;
 }
@@ -552,6 +620,6 @@ QGstVideoRendererFactory_OES::QGstVideoRendererFactory_OES(QObject *parent) :
 
 QGstVideoRenderer *QGstVideoRendererFactory_OES::createRenderer()
 {
-    qInfo()<<"create GstOESVideoRenderer";
+    qInfo()<<"Creating GstOESVideoRenderer";
     return new GstOESVideoRenderer();
 }

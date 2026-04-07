@@ -3,8 +3,8 @@
 
 #include <private/qsgvideonode_p.h>
 
-#include <QSGOpaqueTextureMaterial>
-#include <QSGTexture>
+#include <QSGMaterial>
+//#include <QSGTexture>
 #include "videobuffer_oes.h"
 //#include <EGL/egl.h>
 //#include <EGL/eglext.h>

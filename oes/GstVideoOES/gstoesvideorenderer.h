@@ -6,10 +6,10 @@
 //#include <qabstractvideobuffer.h>
 #include <QtCore/qvariant.h>
 #include <QElapsedTimer>
-#include "private/qgstvideorendererplugin_p.h"
+#include <private/qgstvideorendererplugin_p.h>
 #include <gst/video/video.h>
 #include <EGL/egl.h>
-#define EGL_EGLEXT_PROTOTYPES
+// #define EGL_EGLEXT_PROTOTYPES
 #include <EGL/eglext.h>
 #include <qvideoframe.h>
 #include "../VideoNodeOES/videobuffer_oes.h"
@@ -64,12 +64,9 @@ private:
     bool m_flushed;
     bool m_verbose;
     int m_frameCount;
-//    EGLImageKHR m_image;
-//  QVideoFrame m_frame;
-//#ifndef QT_NO_DEBUG
+
     QElapsedTimer m_timer;
 
-//#endif
 };
 
 
