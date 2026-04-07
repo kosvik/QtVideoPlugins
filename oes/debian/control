@@ -1,5 +1,5 @@
 Source: qt-video-oes-plugins
-Maintainer: Konstantin <konstantin@example.com>
+Maintainer: Konstantin <konstantin@it-screen.net>
 Section: misc
 Priority: optional
 Build-Depends: debhelper-compat (= 13),
