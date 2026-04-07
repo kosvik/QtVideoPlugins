@@ -99,8 +99,8 @@ SUMMARY = "Qt5 Multimedia OES/EGL Video Plugins"
 DESCRIPTION = "Hardware-accelerated Qt Multimedia plugins enabling \
  zero-copy video rendering. Utilizes OpenGL ES and EGL extensions \
  for efficient buffer sharing between GStreamer and the GPU."
-LIC_FILES_CHKSUM = "file://${WORKDIR}/git/LICENSE;md5=1ebbd3e34237af26da5dc08a4e440464"
-LICENSE = "GPL-3.0-only"
+LIC_FILES_CHKSUM = "file://${WORKDIR}/git/LICENSE;md5=b5b6bed06dd8ed68f00c26d0b4cede89"
+LICENSE = "LGPL-3.0-only"
 
 # No information for SRC_URI yet (only an external source tree was specified)
 SRC_URI = "git://github.com/kosvik/QtVideoPlugins.git;protocol=https;branch=master"
