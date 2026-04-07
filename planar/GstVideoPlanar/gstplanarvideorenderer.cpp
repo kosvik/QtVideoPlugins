@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Konstantin Yauseyenka.
+// SPDX-License-Identifier: LGPL-3.0-only
+
 #include <QDebug>
 #include <gst/video/gstvideometa.h>
 #include <gst/allocators/gstdmabuf.h>

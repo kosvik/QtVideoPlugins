@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Konstantin Yauseyenka.
+// SPDX-License-Identifier: LGPL-3.0-only
+
 #ifndef GSTOESVIDEORENDERER_H
 #define GSTOESVIDEORENDERER_H
 

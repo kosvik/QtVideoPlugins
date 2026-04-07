@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Konstantin Yauseyenka.
+// SPDX-License-Identifier: LGPL-3.0-only
+
 #ifndef PLANARVIDEONODE_H
 #define PLANARVIDEONODE_H
 
