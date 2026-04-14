@@ -100,7 +100,7 @@ struct EGLImageBuilder
 
 bool has_egl_dmabuf_support(EGLDisplay dpy) {
   const char* exts = eglQueryString(dpy, EGL_EXTENSIONS);
-  return exts && strstr(exts, "EGL_EXTENSIONS_LINUX_DMA_BUF_EXT");
+  return exts && strstr(exts, "EGL_EXT_image_dma_buf_import");
 }
 
 int _drm_fourcc_from_info (const GstVideoInfo * info)
@@ -510,7 +510,7 @@ bool GstOESVideoRenderer::start(QAbstractVideoSurface *surface, GstCaps *caps)
         }
         if (!has_egl_dmabuf_support(m_eglDisplay))
         {
-            qWarning("EGL Display does not support EGL_EXTENSIONS_LINUX_DMA_BUF_EXT");
+            qWarning("EGL Display does not support EGL_EXT_image_dma_buf_import");
             return false;
         }
     }
